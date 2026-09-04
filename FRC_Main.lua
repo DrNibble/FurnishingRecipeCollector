@@ -7,45 +7,9 @@ FRC.Version = "1.4.9"
 
 FRC.logger = nil
 
--- Price-source mapping between LibPrice source keys and human-readable labels.
-FRC.PriceSourceKeys = {
-  ["Master Merchant"]      = "mm",
-  ["Arkadius Trade Tools"]  = "att",
-  ["Tamriel Trade Centre"]  = "ttc",
-}
-FRC.PriceSourceLabels = {}
-for _label, _key in pairs(FRC.PriceSourceKeys) do
-  FRC.PriceSourceLabels[_key] = _label
-end
-
--- Pretty field names for the tooltip label (avoids showing raw keys like
--- "avgPrice" or "SuggestedPrice").
-FRC.PriceFieldLabels = {
-  ["Min"]            = "Min",
-  ["Avg"]            = "Avg",
-  ["Max"]            = "Max",
-  ["SuggestedPrice"] = "Suggested",
-  ["avgPrice"]      = "Avg",
-}
-
--- True only when the LibPrice global is present and usable.
-function FRC.LibPriceAvailable()
-  return LibPrice ~= nil and type(LibPrice.ItemLinkToPriceGold) == "function"
-end
-
 FRC.defaultSetting = {
   debug = false,
-  price            = "Avg",          -- existing: TTC field (Min/Avg/Max) when source == ttc
-  priceSource      = "ttc",          -- NEW: LibPrice source key: "mm" | "att" | "ttc"
-  priceUseLibPrice = true,           -- NEW: use LibPrice when available (else legacy TTC path)
-  priceFallbackToTTC = true,        -- NEW: if selected source has no data, fall back to direct TTC (marked)
-  priceShowSource  = true,           -- NEW: prefix tooltip price line with source name
-  -- MM data-confidence filter (require both conditions before showing a price)
-  priceMMMinSales   = 5,             -- NEW: minimum numSales for MM price to be shown
-  priceMMMaxDays    = 8,             -- NEW: maximum numDays for MM price to be shown
-  -- Bid/Ask spread thresholds (applies to vRecipeListing, the ask/bid ratio)
-  priceListingGreenMax = 1.15,       -- NEW: ratio <= this -> green (good chance to sell at price)
-  priceListingRedMin  = 1.50,       -- NEW: ratio >= this -> red (won't sell at price)
+  price="Avg",
   furnishing_on = true,
   furnishing_showrecipe_on = true,
   furnishing_showrecipe_ttc_on = true,
@@ -158,120 +122,11 @@ local function OnLoad(eventCode, name)
     {
       type = "divider",
     },
-   -- Existing, relabelled to clarify it only applies when source == ttc
-{
-  type    = "dropdown",
-  name    = "TTC Price Field",
-  tooltip = "Which TTC price field to display (only used when the source is Tamriel Trade Centre).",
-  choices = { "Min", "Avg", "Max" },
-  getFunc = function() return FRC.savedVariables.price end,
-  setFunc = function(newValue) FRC.savedVariables.price = newValue end,
-},
-{
-  type = "divider",
-},
--- NEW: price source selection (LibPrice integration)
-{
-  type    = "dropdown",
-  name    = "Price Source",
-  tooltip = "Which add-on LibPrice should query for item prices.",
-  choices = { "Master Merchant", "Arkadius Trade Tools", "Tamriel Trade Centre" },
-  getFunc = function()
-      return FRC.PriceSourceLabels[FRC.savedVariables.priceSource] or "Tamriel Trade Centre"
-  end,
-  setFunc = function(newValue)
-      FRC.savedVariables.priceSource = FRC.PriceSourceKeys[newValue] or "ttc"
-  end,
-  disabled = function() return not FRC.LibPriceAvailable() end,
-  warning  = "Requires the LibPrice library and the matching price add-on to be installed.",
-},
-{
-  type    = "checkbox",
-  name    = "Use LibPrice for Prices",
-  tooltip = "When LibPrice is installed, use it to read prices. Disable to fall back to direct TamrielTradeCentre queries.",
-  getFunc = function() return FRC.savedVariables.priceUseLibPrice end,
-  setFunc = function(newValue) FRC.savedVariables.priceUseLibPrice = newValue end,
-  disabled = function() return not FRC.LibPriceAvailable() end,
-  requiresReload = false,
-},
-{
-  type    = "checkbox",
-  name    = "Fallback to TTC if Source Empty",
-  tooltip = "If the selected source has no price for an item, fall back to a direct Tamriel Trade Centre lookup (shown as 'fallback' in the tooltip). Disable to leave the price blank instead.",
-  getFunc = function() return FRC.savedVariables.priceFallbackToTTC end,
-  setFunc = function(newValue) FRC.savedVariables.priceFallbackToTTC = newValue end,
-  disabled = function() return not (TamrielTradeCentrePrice ~= nil) end,
-  requiresReload = false,
-},
-{
-  type    = "checkbox",
-  name    = "Show Price Source in Tooltip",
-  tooltip = "Prefix the price line with the name of the source add-on.",
-  getFunc = function() return FRC.savedVariables.priceShowSource end,
-  setFunc = function(newValue) FRC.savedVariables.priceShowSource = newValue end,
-  requiresReload = false,
-},
-{
-  type = "divider",
-},
--- NEW: Master Merchant data-confidence filter
-{
-  type    = "slider",
-  name    = "MM Minimum Sales",
-  tooltip = "Master Merchant price is only shown when the item has more than this many sales. Filters out low-sample (unreliable) prices.",
-  min     = 0,
-  max     = 50,
-  step    = 1,
-  default = 5,
-  getFunc = function() return FRC.savedVariables.priceMMMinSales end,
-  setFunc = function(newValue) FRC.savedVariables.priceMMMinSales = newValue end,
-  disabled = function() return not (FRC.savedVariables.priceSource == "mm" and FRC.LibPriceAvailable()) end,
-  requiresReload = false,
-},
-{
-  type    = "slider",
-  name    = "MM Maximum Age (days)",
-  tooltip = "Master Merchant price is only shown when the sales data is more recent than this many days. Filters out stale prices.",
-  min     = 1,
-  max     = 30,
-  step    = 1,
-  default = 8,
-  getFunc = function() return FRC.savedVariables.priceMMMaxDays end,
-  setFunc = function(newValue) FRC.savedVariables.priceMMMaxDays = newValue end,
-  disabled = function() return not (FRC.savedVariables.priceSource == "mm" and FRC.LibPriceAvailable()) end,
-  requiresReload = false,
-},
-{
-  type = "divider",
-},
--- NEW: Bid/Ask spread color thresholds
-{
-  type    = "slider",
-  name    = "Bid/Ask Green (sellable) up to",
-  tooltip = "Bid/Ask ratio at or below this is shown green (tight spread, good chance to sell at the ask price).",
-  min     = 1.00,
-  max     = 2.00,
-  step    = 0.05,
-  default = 1.15,
-  getFunc = function() return FRC.savedVariables.priceListingGreenMax end,
-  setFunc = function(newValue) FRC.savedVariables.priceListingGreenMax = newValue end,
-  requiresReload = false,
-},
-{
-  type    = "slider",
-  name    = "Bid/Ask Red (unsellable) from",
-  tooltip = "Bid/Ask ratio at or above this is shown red (wide spread, unlikely to sell at the ask price).",
-  min     = 1.00,
-  max     = 3.00,
-  step    = 0.05,
-  default = 1.50,
-  getFunc = function() return FRC.savedVariables.priceListingRedMin end,
-  setFunc = function(newValue) FRC.savedVariables.priceListingRedMin = newValue end,
-  requiresReload = false,
-},
-{
-  type = "divider",
-},
+    {
+      type = "dropdown", name = "TTC Price", tooltip = "The price that will display across the addon", choices = {"Min", "Avg", "Max"}, getFunc = function() return FRC.savedVariables.price end, setFunc = function( newValue ) FRC.savedVariables.price = newValue; if FRC.logger ~= nil then FRC.logger:SetEnabled(FRC.savedVariables.price) end end, },
+    {
+      type = "divider",
+    },
     { type = "checkbox", name = "Debug Logging Enabled", getFunc = function() return FRC.savedVariables.debug end, setFunc = function( newValue ) FRC.savedVariables.debug = newValue; if FRC.logger ~= nil then FRC.logger:SetEnabled(FRC.savedVariables.debug) end end, --[[warning = "",]] requiresReload = false},
     {
       type = "divider",

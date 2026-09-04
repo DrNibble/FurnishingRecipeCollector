@@ -25,151 +25,6 @@ local function GetItemlinkDetails(itemLinkOrItemId)
 end
 
 --------------------------------------------------------------------
--- Price lookup
--- Centralises all price fetching behind one source-agnostic helper.
--- Uses LibPrice (Sharlikran fork), which provides ItemLinkToBidAskSpread.
---
--- Returns:
---   price              (number|nil)  gold price to display
---   spreadRatio        (number|nil)  Bid/Ask ratio from ItemLinkToBidAskSpread
---                                   (vRecipeListing in the tooltip)
---   sourceLabel        (string)      human source name for the tooltip
---   fieldName          (string|nil)  price field used (Avg/Min/Max/avgPrice/...)
---   spreadLabel        (string|nil)  human label for the Bid/Ask line
---   priceProfitable    (boolean|nil) true only for the MM source when
---                                   craftCost > 0 and craftCost < avgPrice
---                                   (profitable to craft & sell); nil otherwise
---
--- The Bid/Ask spread is computed by the REAL LibPrice function
--- ItemLinkToBidAskSpread (verified in the attached LibPrice.lua). It is NOT
--- synthesized from avgPrice.
---------------------------------------------------------------------
-function FRC.GetRecipePrice(itemLink)
-  local sv          = FRC.savedVariables or {}
-  local useLib     = sv.priceUseLibPrice ~= false and FRC.LibPriceAvailable()
-  local sourceKey  = sv.priceSource or "ttc"
-  local sourceLabel = FRC.PriceSourceLabels[sourceKey] or "Tamriel Trade Centre"
-
-  -- Bid/Ask spread is computed from the selected source via the real LibPrice
-  -- function. It is gated on priceUseLibPrice so that disabling LibPrice restores
-  -- v1.4.9 exactly (no Bid/Ask line). It is independent of the price-display
-  -- path below, so a trustworthy MM price is NOT required to show the spread.
-  local spreadRatio, spreadLabel = nil, nil
-  if useLib and itemLink ~= nil then
-    spreadRatio, spreadLabel = FRC.GetBidAskSpread(itemLink, sourceKey)
-    -- Label the spread with its source so it is clear the Bid/Ask reflects the
-    -- selected source (e.g. "Master Merchant Bid/Ask") even when the PRICE line
-    -- has fallen back to TTC.
-    if spreadLabel ~= nil then
-      spreadLabel = (sourceLabel or "Source") .. " Bid/Ask"
-    end
-  end
-
-  -- ----- Path A: LibPrice -------------------------------------------------
-  if useLib and itemLink ~= nil then
-    local data = LibPrice.ItemLinkToPriceData(itemLink, sourceKey)
-    local src = data and data[sourceKey]
-
-    if sourceKey == "ttc" then
-      -- TTC: preserve the user's Min/Avg/Max field selection ourselves.
-      if src then
-        local field = sv.price or "Avg"
-        local price = src[field]
-        if price ~= nil then
-          return price, spreadRatio, sourceLabel, field, spreadLabel, nil
-        end
-      end
-
-    elseif sourceKey == "mm" then
-      -- MM: only show the price if the data is trustworthy: enough sales AND
-      -- recent enough. Both thresholds are user-configurable saved vars.
-      -- Uses ItemLinkToPriceData (not ItemLinkToPriceGold) so we can read
-      -- numSales / numDays, which ItemLinkToPriceGold discards.
-      if src and src.avgPrice and src.numSales and src.numDays
-         and src.numSales > (sv.priceMMMinSales or 5)
-         and src.numDays  < (sv.priceMMMaxDays  or 8) then
-        -- Profitable to craft & sell when the crafting cost is strictly below
-        -- the average sale price. craftCost is only present for the MM source.
-        -- Guard against unknown/zero craftCost (0 = no data) so we never color
-        -- a price green from missing craft-cost data.
-        local priceProfitable =
-            src.craftCost ~= nil and src.craftCost > 0
-            and src.avgPrice ~= nil
-            and src.craftCost < src.avgPrice
-        return src.avgPrice, spreadRatio, sourceLabel, "avgPrice",
-               spreadLabel, priceProfitable
-      end
-      -- Data present but not trustworthy (few sales or stale): do NOT show a
-      -- price for this source. Fall through to the optional TTC fallback.
-
-    else -- "att" and any future source
-      local gold, sKey, fName = LibPrice.ItemLinkToPriceGold(itemLink, sourceKey)
-      if gold ~= nil then
-        return gold, spreadRatio, FRC.PriceSourceLabels[sKey] or sourceLabel,
-               fName, spreadLabel, nil
-      end
-    end
-
-    -- Selected source had no (trustworthy) data: optional fallback to direct TTC.
-    -- The spread stays from the selected source (computed above); only the
-    -- price line falls back, and it is labeled as a fallback.
-    if sv.priceFallbackToTTC ~= false then
-      local price, _, field = FRC.GetTTCPriceDirect(itemLink, sv)
-      if price ~= nil then
-        return price, spreadRatio,
-               "Tamriel Trade Centre (fallback from " .. sourceLabel .. ")",
-               field, spreadLabel, nil
-      end
-    end
-    return nil, spreadRatio, sourceLabel, nil, spreadLabel, nil
-  end
-
-  -- ----- Path B: legacy direct TamrielTradeCentre --------------------------
-  -- Reached when LibPrice is absent or priceUseLibPrice is off. No Bid/Ask
-  -- line is shown in this path (spreadRatio stays nil).
-  local price, _, field = FRC.GetTTCPriceDirect(itemLink, sv)
-  if price ~= nil then
-    return price, nil, "Tamriel Trade Centre", field, nil, nil
-  end
-
-  -- ----- Path C: nothing available ---------------------------------------
-  return nil, spreadRatio, sourceLabel, nil, spreadLabel, nil
-end
-
--- Bid/Ask spread via the REAL LibPrice.ItemLinkToBidAskSpread function.
--- Respects the selected source (passed as the source allowlist).
--- Uses ONLY the "gold" currency entry; if gold is absent or bid/ask missing,
--- returns nil (the tooltip then omits the Bid/Ask line or shows "no data").
--- Returns: ratio = ask.value / bid.value (>= 1.0), human label ("Bid/Ask").
-function FRC.GetBidAskSpread(itemLink, sourceKey)
-  if not (LibPrice and type(LibPrice.ItemLinkToBidAskSpread) == "function") then
-    return nil, nil
-  end
-  if itemLink == nil then return nil, nil end
-
-  local spread = LibPrice.ItemLinkToBidAskSpread(itemLink, sourceKey)
-  local gold = spread and spread.gold
-  local ask = gold and gold.ask
-  local bid = gold and gold.bid
-
-  if not ask or not bid or not ask.value or not bid.value or bid.value <= 0 then
-    return nil, nil
-  end
-
-  return ask.value / bid.value, "Bid/Ask"
-end
-
--- Legacy direct TamrielTradeCentre lookup, shared by the LibPrice fallback
--- and the no-LibPrice path. Returns price, listings, fieldName.
-function FRC.GetTTCPriceDirect(itemLink, sv)
-  if TamrielTradeCentrePrice == nil or itemLink == nil then return nil, nil, nil end
-  local priceTable = TamrielTradeCentrePrice:GetPriceInfo(itemLink)
-  if priceTable == nil then return nil, nil, nil end
-  local field = (sv and sv.price) or "Avg"
-  return priceTable[field], priceTable["EntryCount"], field
-end
-
---------------------------------------------------------------------
 -- Recipe Functions
 --------------------------------------------------------------------
 function FRC.GetRecipeDetail(itemLinkOrItemID)
@@ -184,9 +39,6 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
   local vGrabBagItemLinkId, vGrabBagItemLink, vGrabBagItemName = nil, nil, nil
   local vResultLinkId, vResultLink, vResultName = nil, nil, nil
   local vLocation, vRecipePrice, vRecipeListing = nil, nil, nil
-  local vRecipePriceSource, vRecipePriceField = nil, nil
-  local vRecipePriceSpreadLabel = nil
-  local vRecipePriceProfitable = nil
 
   if FRC.Data.Folios[vItemId] ~= nil then
     -- This is a folio
@@ -331,25 +183,19 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
     end
   end
 
-  -- vRecipePrice:      gold amount (number|nil)
-  -- vRecipeListing:    Bid/Ask spread ratio from LibPrice.ItemLinkToBidAskSpread
-  --                     (number|nil) — colored green/red in the tooltip
-  -- vRecipePriceSource: human label for the price source line
-  -- vRecipePriceField:  price field used (Avg/Min/Max/avgPrice/...)
-  -- vRecipePriceSpreadLabel: "<Source> Bid/Ask" label for the spread line
-  -- vRecipePriceProfitable: true only for MM when craftCost < avgPrice
-  --                     (price value colored green in the tooltip)
-  vRecipePrice, vRecipeListing, vRecipePriceSource, vRecipePriceField,
-  vRecipePriceSpreadLabel, vRecipePriceProfitable =
-      FRC.GetRecipePrice(vRecipeItemLink)
-  
-   return vItemId, vItemName, vItemFunctionalQuality, vItemType, vSpecialType,
-         vFolioItemLinkId, vFolioItemLink, vFolioItemName,
-         vRecipeItemLinkId, vRecipeItemLink, vRecipeItemName,
-         vGrabBagItemLinkId, vGrabBagItemLink, vGrabBagItemName,
-         vLocation, vResultLinkId, vResultLink, vResultName,
-         vRecipePrice, vRecipeListing, vRecipePriceSource, vRecipePriceField,
-         vRecipePriceSpreadLabel, vRecipePriceProfitable
+  if TamrielTradeCentrePrice~= nil then
+    local priceTable = TamrielTradeCentrePrice:GetPriceInfo(vRecipeItemLink)
+    if priceTable ~= nil then
+      if priceTable[FRC.savedVariables.price] ~= nil then
+        vRecipePrice = priceTable[FRC.savedVariables.price]
+      end
+      if priceTable["EntryCount"] ~= nil then
+        vRecipeListing = priceTable["EntryCount"]
+      end
+    end
+  end
+
+  return vItemId, vItemName, vItemFunctionalQuality, vItemType, vSpecialType, vFolioItemLinkId, vFolioItemLink, vFolioItemName, vRecipeItemLinkId, vRecipeItemLink, vRecipeItemName, vGrabBagItemLinkId, vGrabBagItemLink, vGrabBagItemName, vLocation, vResultLinkId, vResultLink, vResultName, vRecipePrice, vRecipeListing
 end
 
 function FRC.GetWritVendorContainerStats(vendorContainerLinkId)

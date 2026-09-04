@@ -12,7 +12,7 @@
 ## Author: tomstock
 ## APIVersion: 101050
 ## SavedVariables: FurnishingRecipeCollectorSavedVariables
-## OptionalDependsOn: LibDebugLogger>=180 LibCharacterKnowledge>=202030 TamrielTradeCentrePrice LibSlashCommander AwesomeGuildStore LibPrice
+## OptionalDependsOn: LibDebugLogger>=180 LibCharacterKnowledge>=202030 TamrielTradeCentrePrice LibSlashCommander AwesomeGuildStore
 ## DependsOn: LibAddonMenu-2.0>=41 LibScrollableMenu>=020401
 
 fix_tooltip.lua
