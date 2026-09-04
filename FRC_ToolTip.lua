@@ -18,7 +18,7 @@ local function adjustToolTip(tooltipControl, itemLink)
         vRecipeItemLinkId, vRecipeItemLink, vRecipeItemName,
         vGrabBagItemLinkId, vGrabBagItemLink, vGrabBagItemName,
         vLocation, vResultLinkId, vResultLink, vResultName,
-        vRecipePrice, vRecipeListing, vRecipePriceProfitable =
+        vRecipePrice, vRecipeListing, vRecipePriceProfitable, vRecipeCraftCost =
       FRC.GetRecipeDetail(itemLink)
 
   if vItemType == ITEMTYPE_CONTAINER then
@@ -131,6 +131,15 @@ local function adjustToolTip(tooltipControl, itemLink)
     end
     tooltipControl:AddLine(label,
         string.format("$(%s)|$(KB_%s)|%s", fontStyle, fontSizeH1, fontWeight))
+
+    -- Craft cost, sourced from the associated recipe/plan (see GetRecipePrice).
+    -- Shown alongside the sale price so the margin is visible at a glance.
+    -- Only meaningful when present and strictly positive (0 = no data).
+    if vRecipeCraftCost ~= nil and vRecipeCraftCost > 0 then
+      local craftCostText = zo_strformat("<<1>>", ZO_LocalizeDecimalNumber(vRecipeCraftCost))
+      tooltipControl:AddLine("Craft Cost: " .. craftCostText,
+          string.format("$(%s)|$(KB_%s)|%s", fontStyle, fontSizeH1, fontWeight))
+    end
   end
 end
 

@@ -58,24 +58,53 @@ end
 -- Queries Master Merchant directly via MasterMerchant:itemStats(itemLink, false)
 -- which returns a table with: avgPrice, numSales, numDays, numItems, craftCost.
 --
+-- itemLink is expected to be the finished furnishing (the crafted result). MM's
+-- craftCost is not trustworthy for the finished product, so when itemLink is not
+-- itself a recipe/plan we discard its craftCost and instead read the craftCost
+-- of the associated recipe/plan (recipeItemLink, resolved upstream by
+-- GetRecipeDetail). That keeps a craft cost visible on the finished product,
+-- derived from its recipe.
+--
+-- Parameters:
+--   itemLink       (string)  item link to price (usually the result furnishing)
+--   recipeItemLink (string?) associated recipe/plan link; used to source craftCost
+--                  when itemLink is the finished product
+--
 -- Returns:
 --   price              (number|nil)  gold price to display (avgPrice)
 --   profitable          (boolean|nil) true when craftCost > 0 and craftCost < avgPrice
 --   numSales            (number|nil)  number of sales recorded by MM
 --   numDays             (number|nil)  age of sales data in days
+--   craftCost           (number|nil)  crafting cost (from the recipe/plan)
 --------------------------------------------------------------------
 function FRC.MasterMerchantAvailable()
   return MasterMerchant ~= nil and type(MasterMerchant.itemStats) == "function"
 end
 
-function FRC.GetRecipePrice(itemLink)
+-- Returns true when itemLink is a furnishing recipe / plan (formula, diagram,
+-- pattern, schematic, sketch, design or blueprint), as opposed to the finished
+-- crafted furnishing. MasterMerchant:itemStats reports a craftCost that is only
+-- meaningful for a recipe/plan; for the finished product it must be ignored.
+local function IsFurnishingRecipeItemLink(itemLink)
+  if itemLink == nil then return false end
+  local _, vSpecialType = GetItemLinkItemType(itemLink)
+  return vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_ALCHEMY_FORMULA_FURNISHING
+      or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_BLACKSMITHING_DIAGRAM_FURNISHING
+      or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_CLOTHIER_PATTERN_FURNISHING
+      or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_ENCHANTING_SCHEMATIC_FURNISHING
+      or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_JEWELRYCRAFTING_SKETCH_FURNISHING
+      or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_PROVISIONING_DESIGN_FURNISHING
+      or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_WOODWORKING_BLUEPRINT_FURNISHING
+end
+
+function FRC.GetRecipePrice(itemLink, recipeItemLink)
   if itemLink == nil then
     if FRC.logger ~= nil then FRC.logger:Verbose("GetRecipePrice: itemLink is nil") end
-    return nil, nil, nil, nil
+    return nil, nil, nil, nil, nil
   end
   if not FRC.MasterMerchantAvailable() then
     if FRC.logger ~= nil then FRC.logger:Verbose("GetRecipePrice: MasterMerchant not available") end
-    return nil, nil, nil, nil
+    return nil, nil, nil, nil, nil
   end
 
   local sv = FRC.savedVariables or {}
@@ -83,17 +112,40 @@ function FRC.GetRecipePrice(itemLink)
   local maxDays  = sv.priceMMMaxDays  or 8
 
   local stats = MasterMerchant:itemStats(itemLink, false)
+  -- craftCost is only reliable for a recipe / furniture plan. When itemLink is
+  -- the finished furnishing (the usual case here) its own craftCost is not
+  -- trustworthy: discard it and source craftCost from the associated
+  -- recipe/plan (recipeItemLink) so the finished product still shows a craft
+  -- cost derived from its recipe. craftCost is resolved before the sale-price
+  -- confidence checks below so it can still be returned even when the finished
+  -- product has no reliable MM sale price.
+  local craftCost
+  if stats ~= nil then
+    if IsFurnishingRecipeItemLink(itemLink) then
+      craftCost = stats.craftCost
+    else
+      craftCost = nil
+      if recipeItemLink ~= nil then
+        local recipeStats = MasterMerchant:itemStats(recipeItemLink, false)
+        if recipeStats ~= nil and recipeStats.craftCost ~= nil then
+          craftCost = recipeStats.craftCost
+        end
+      end
+      stats.craftCost = craftCost
+    end
+  end
   if FRC.logger ~= nil then
     FRC.logger:Verbose("GetRecipePrice: link="..tos(itemLink)
+      .." recipeLink="..tos(recipeItemLink)
       .." stats="..tos(stats)
       .." avgPrice="..tos(stats and stats.avgPrice)
       .." numSales="..tos(stats and stats.numSales)
       .." numDays="..tos(stats and stats.numDays)
-      .." craftCost="..tos(stats and stats.craftCost))
+      .." craftCost="..tos(craftCost))
   end
 
   if stats == nil or stats.avgPrice == nil then
-    return nil, nil, nil, nil
+    return nil, nil, nil, nil, craftCost
   end
 
   -- MM data-confidence filter: require enough sales AND recent enough data.
@@ -105,7 +157,7 @@ function FRC.GetRecipePrice(itemLink)
       FRC.logger:Verbose("GetRecipePrice: filtered out - numSales="..tos(stats.numSales)
         .." <= "..tos(minSales).." or numDays="..tos(stats.numDays).." >= "..tos(maxDays))
     end
-    return nil, nil, stats.numSales, stats.numDays
+    return nil, nil, stats.numSales, stats.numDays, craftCost
   end
 
   -- Profitable to craft & sell when the crafting cost is strictly below
@@ -113,11 +165,11 @@ function FRC.GetRecipePrice(itemLink)
   -- Guard against unknown/zero craftCost (0 = no data) so we never color
   -- a price green from missing craft-cost data.
   local profitable =
-      stats.craftCost ~= nil and stats.craftCost > 0
+      craftCost ~= nil and craftCost > 0
       and stats.avgPrice ~= nil
-      and stats.craftCost < stats.avgPrice
+      and craftCost < stats.avgPrice
 
-  return stats.avgPrice, profitable, stats.numSales, stats.numDays
+  return stats.avgPrice, profitable, stats.numSales, stats.numDays, craftCost
 end
 
 --------------------------------------------------------------------
@@ -136,6 +188,7 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
   local vResultLinkId, vResultLink, vResultName = nil, nil, nil
   local vLocation, vRecipePrice, vRecipeListing = nil, nil, nil
   local vRecipePriceProfitable = nil
+  local vRecipeCraftCost = nil
 
   if FRC.Data.Folios[vItemId] ~= nil then
     -- This is a folio
@@ -284,24 +337,28 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
   -- vRecipeListing:        numSales from MM (number|nil)
   -- vRecipePriceProfitable: true when craftCost > 0 and craftCost < avgPrice
   --                         (price value colored green in the tooltip)
+  -- vRecipeCraftCost:      crafting cost (number|nil) sourced from the
+  --                         associated recipe/plan, shown in the tooltip
   --
-  -- Price lookup uses vResultLink (the crafted item) not vRecipeItemLink
-  -- (the recipe/plan), because Master Merchant tracks sales of the finished
-  -- furnishing, not of the recipe scroll itself.
+  -- avgPrice/numSales come from vResultLink (the finished furnishing), because
+  -- Master Merchant tracks sales of the finished furnishing, not of the recipe
+  -- scroll itself. craftCost, however, is not trustworthy on the finished
+  -- product, so vRecipeItemLink is also passed in to let GetRecipePrice source
+  -- craftCost from the associated recipe/plan instead.
   if FRC.logger ~= nil then
     FRC.logger:Verbose("GetRecipeDetail: vRecipeItemLink="..tos(vRecipeItemLink)
       .." vResultLink="..tos(vResultLink)
       .." vResultName="..tos(vResultName))
   end
-  vRecipePrice, vRecipePriceProfitable, vRecipeListing =
-      FRC.GetRecipePrice(vResultLink)
+  vRecipePrice, vRecipePriceProfitable, vRecipeListing, _, vRecipeCraftCost =
+      FRC.GetRecipePrice(vResultLink, vRecipeItemLink)
   
    return vItemId, vItemName, vItemFunctionalQuality, vItemType, vSpecialType,
          vFolioItemLinkId, vFolioItemLink, vFolioItemName,
          vRecipeItemLinkId, vRecipeItemLink, vRecipeItemName,
          vGrabBagItemLinkId, vGrabBagItemLink, vGrabBagItemName,
          vLocation, vResultLinkId, vResultLink, vResultName,
-         vRecipePrice, vRecipeListing, vRecipePriceProfitable
+         vRecipePrice, vRecipeListing, vRecipePriceProfitable, vRecipeCraftCost
 end
 
 function FRC.GetWritVendorContainerStats(vendorContainerLinkId)
