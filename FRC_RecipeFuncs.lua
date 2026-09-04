@@ -235,11 +235,15 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
   end
 
   -- vRecipePrice:        gold amount (number|nil) from Master Merchant
-  -- vRecipeListing:        numSales from MM (number|nil) - kept for GUI compatibility
+  -- vRecipeListing:        numSales from MM (number|nil)
   -- vRecipePriceProfitable: true when craftCost > 0 and craftCost < avgPrice
   --                         (price value colored green in the tooltip)
+  --
+  -- Price lookup uses vResultLink (the crafted item) not vRecipeItemLink
+  -- (the recipe/plan), because Master Merchant tracks sales of the finished
+  -- furnishing, not of the recipe scroll itself.
   vRecipePrice, vRecipePriceProfitable, vRecipeListing =
-      FRC.GetRecipePrice(vRecipeItemLink)
+      FRC.GetRecipePrice(vResultLink)
   
    return vItemId, vItemName, vItemFunctionalQuality, vItemType, vSpecialType,
          vFolioItemLinkId, vFolioItemLink, vFolioItemName,
