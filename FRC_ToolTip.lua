@@ -7,7 +7,6 @@ local FRC = FurnishingRecipeCollector
 --ZOs local speed-up/reference variables
 local tos = tostring
 local LCK = LibCharacterKnowledge
-local SLASH = LibSlashCommander
 
 local function adjustToolTip(tooltipControl, itemLink)
   local fontStyle = "MEDIUM_FONT"
@@ -19,8 +18,7 @@ local function adjustToolTip(tooltipControl, itemLink)
         vRecipeItemLinkId, vRecipeItemLink, vRecipeItemName,
         vGrabBagItemLinkId, vGrabBagItemLink, vGrabBagItemName,
         vLocation, vResultLinkId, vResultLink, vResultName,
-        vRecipePrice, vRecipeListing, vRecipePriceSource, vRecipePriceField,
-        vRecipePriceSpreadLabel, vRecipePriceProfitable =
+        vRecipePrice, vRecipeListing, vRecipePriceProfitable =
       FRC.GetRecipeDetail(itemLink)
 
   if vItemType == ITEMTYPE_CONTAINER then
@@ -106,25 +104,20 @@ local function adjustToolTip(tooltipControl, itemLink)
     end
   end
   --Add price data to to all recipes
-  if (vItemType == ITEMTYPE_FURNISHING and FRC.savedVariables.furnishing_showrecipe_ttc_on and vRecipeItemLinkId ~= nil)
+  if (vItemType == ITEMTYPE_FURNISHING and FRC.savedVariables.furnishing_showrecipe_mm_on and vRecipeItemLinkId ~= nil)
       or ((vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_ALCHEMY_FORMULA_FURNISHING
       or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_BLACKSMITHING_DIAGRAM_FURNISHING
       or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_CLOTHIER_PATTERN_FURNISHING
       or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_ENCHANTING_SCHEMATIC_FURNISHING
       or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_JEWELRYCRAFTING_SKETCH_FURNISHING
       or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_PROVISIONING_DESIGN_FURNISHING
-      or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_WOODWORKING_BLUEPRINT_FURNISHING) and FRC.savedVariables.furnishingrecipe_ttc_on) then
+      or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_WOODWORKING_BLUEPRINT_FURNISHING) and FRC.savedVariables.furnishingrecipe_mm_on) then
 
-    -- Build the price label, prefixed with the source add-on name (and the
-    -- field name when available, e.g. "Tamriel Trade Centre Avg Price").
+    -- Build the price label from Master Merchant data.
     -- When no price is available, show "no data" instead of a misleading 0.
     local label
     if vRecipePrice == nil then
-      if FRC.savedVariables.priceShowSource and vRecipePriceSource ~= nil then
-        label = string.format("%s Price: no data", vRecipePriceSource)
-      else
-        label = "Average Price: no data"
-      end
+      label = "MM Price: no data"
     else
       -- Numeric price text. When the MM source reports the craft is profitable
       -- (craftCost > 0 and craftCost < avgPrice), color just the price value
@@ -134,42 +127,10 @@ local function adjustToolTip(tooltipControl, itemLink)
       if vRecipePriceProfitable then
         priceText = "|c55FF1C" .. priceText .. "|r"
       end
-      if FRC.savedVariables.priceShowSource and vRecipePriceSource ~= nil then
-        local fieldLabel = FRC.PriceFieldLabels[vRecipePriceField] or vRecipePriceField
-        if fieldLabel ~= nil then
-          label = string.format("%s %s Price: %s", vRecipePriceSource, fieldLabel, priceText)
-        else
-          label = string.format("%s Price: %s", vRecipePriceSource, priceText)
-        end
-      else
-        label = "Average Price: " .. priceText
-      end
+      label = "MM Price: " .. priceText
     end
     tooltipControl:AddLine(label,
         string.format("$(%s)|$(KB_%s)|%s", fontStyle, fontSizeH1, fontWeight))
-
-    -- Bid/Ask spread line. vRecipeListing now holds the ask/bid ratio from
-    -- LibPrice.ItemLinkToBidAskSpread (NOT a listing count). A LOW ratio (tight
-    -- spread) = green = good chance to sell at the ask price; a HIGH ratio (wide
-    -- spread) = red = overpriced, unlikely to sell at the ask. Amber in between.
-    -- Inline |c color markup is rendered by AddLine(text, fontString).
-    if vRecipeListing ~= nil then
-      local ratioText = string.format("%.2f", vRecipeListing)
-      local colored
-      local greenMax = FRC.savedVariables.priceListingGreenMax or 1.15
-      local redMin  = FRC.savedVariables.priceListingRedMin  or 1.50
-      if vRecipeListing <= greenMax then
-        colored = "|c55FF1C" .. ratioText .. "|r"   -- green: sellable
-      elseif vRecipeListing >= redMin then
-        colored = "|cFF3333" .. ratioText .. "|r"   -- red: unsellable
-      else
-        colored = "|cE2C437" .. ratioText .. "|r"   -- amber
-      end
-      tooltipControl:AddLine(
-          string.format("%s (low=sellable, high=unsellable): %s",
-              vRecipePriceSpreadLabel or "Bid/Ask", colored),
-          string.format("$(%s)|$(KB_%s)|%s", fontStyle, fontSizeH1, fontWeight))
-    end
   end
 end
 
