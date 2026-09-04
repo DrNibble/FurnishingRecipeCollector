@@ -156,6 +156,92 @@ local function OnLoad(eventCode, name)
   LAM:RegisterOptionControls(FRC.Name .. "Options", dataTable )
 
   FRC.HookTooltips()
+
+  -- Debug slash command for price lookup diagnostics
+  SLASH_COMMANDS["/frc_debug"] = function(itemLink)
+    if itemLink == nil or itemLink == "" then
+      d("FRC Debug: /frc_debug <itemLink> - paste an item link")
+      return
+    end
+
+    d("=== FRC Debug ===")
+    d("Input link: " .. tostring(itemLink))
+
+    local vItemId = GetItemLinkItemId(itemLink)
+    d("ItemId: " .. tostring(vItemId))
+
+    local vItemType, vSpecialType = GetItemLinkItemType(itemLink)
+    d("ItemType: " .. tostring(vItemType) .. " SpecialType: " .. tostring(vSpecialType))
+
+    -- Try GetItemLinkRecipeResultItemLink with the ORIGINAL tooltip link
+    local resultLink = GetItemLinkRecipeResultItemLink(itemLink)
+    d("GetItemLinkRecipeResultItemLink(itemLink): " .. tostring(resultLink))
+
+    -- Try with Linkify
+    local linkified = "|H1:item:" .. vItemId .. ":1:1:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0|h|h"
+    local resultLink2 = GetItemLinkRecipeResultItemLink(linkified)
+    d("GetItemLinkRecipeResultItemLink(Linkify): " .. tostring(resultLink2))
+
+    -- Try alternative API: GetRecipeInfoFromItemId + GetRecipeResultItemLink
+    local craftingStationType, recipeListIndex, recipeIndex = GetRecipeInfoFromItemId(vItemId)
+    d("GetRecipeInfoFromItemId: station=" .. tostring(craftingStationType)
+      .. " listIndex=" .. tostring(recipeListIndex)
+      .. " recipeIndex=" .. tostring(recipeIndex))
+    if recipeListIndex and recipeIndex then
+      local altResultLink = GetRecipeResultItemLink(recipeListIndex, recipeIndex, LINK_STYLE_BRACKETS)
+      d("GetRecipeResultItemLink: " .. tostring(altResultLink))
+    end
+
+    -- Also try the FRC helper
+    local frcResultLink = FRC.GetRecipeResultLink(itemLink, vItemId)
+    d("FRC.GetRecipeResultLink: " .. tostring(frcResultLink))
+
+    -- Check MasterMerchant
+    if MasterMerchant == nil then
+      d("MasterMerchant: NOT INSTALLED")
+    elseif type(MasterMerchant.itemStats) ~= "function" then
+      d("MasterMerchant: itemStats is not a function")
+    else
+      d("MasterMerchant: available")
+
+      -- Try with the recipe link
+      local stats1 = MasterMerchant:itemStats(itemLink, false)
+      d("MM itemStats(recipeLink): " .. tostring(stats1))
+      if stats1 then
+        d("  avgPrice=" .. tostring(stats1.avgPrice)
+          .. " numSales=" .. tostring(stats1.numSales)
+          .. " numDays=" .. tostring(stats1.numDays)
+          .. " craftCost=" .. tostring(stats1.craftCost))
+      end
+
+      -- Try with the result link
+      if resultLink then
+        local stats2 = MasterMerchant:itemStats(resultLink, false)
+        d("MM itemStats(resultLink): " .. tostring(stats2))
+        if stats2 then
+          d("  avgPrice=" .. tostring(stats2.avgPrice)
+            .. " numSales=" .. tostring(stats2.numSales)
+            .. " numDays=" .. tostring(stats2.numDays)
+            .. " craftCost=" .. tostring(stats2.craftCost))
+        end
+      end
+
+      -- Try with Linkify of result itemId
+      if resultLink then
+        local resultItemId = GetItemLinkItemId(resultLink)
+        local linkifiedResult = "|H1:item:" .. resultItemId .. ":1:1:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0|h|h"
+        local stats3 = MasterMerchant:itemStats(linkifiedResult, false)
+        d("MM itemStats(LinkifyResult): " .. tostring(stats3))
+        if stats3 then
+          d("  avgPrice=" .. tostring(stats3.avgPrice)
+            .. " numSales=" .. tostring(stats3.numSales)
+            .. " numDays=" .. tostring(stats3.numDays)
+            .. " craftCost=" .. tostring(stats3.craftCost))
+        end
+      end
+    end
+    d("=== End FRC Debug ===")
+  end
 end
 function FRC.Donate(control, mouseButton)
   local amount = 2000

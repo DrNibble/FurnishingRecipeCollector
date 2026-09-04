@@ -13,6 +13,10 @@ end
 local function GetItemlinkDetails(itemLinkOrItemId)
   local vItemLink, vItemId
 
+  if itemLinkOrItemId == nil then
+    return nil, nil
+  end
+
   if type(itemLinkOrItemId) == "string" then
     vItemLink = itemLinkOrItemId
     vItemId = GetItemLinkItemId(vItemLink)
@@ -22,6 +26,30 @@ local function GetItemlinkDetails(itemLinkOrItemId)
   end
 
   return vItemLink, vItemId
+end
+
+-- Get the result item link from a recipe item link.
+-- Tries GetItemLinkRecipeResultItemLink first, then falls back to
+-- GetRecipeInfoFromItemId + GetRecipeResultItemLink.
+function FRC.GetRecipeResultLink(itemLink, itemId)
+  -- Method 1: direct API
+  local resultLink = GetItemLinkRecipeResultItemLink(itemLink)
+  if resultLink and resultLink ~= "" then
+    return resultLink
+  end
+
+  -- Method 2: via recipe list index
+  if itemId then
+    local _, recipeListIndex, recipeIndex = GetRecipeInfoFromItemId(itemId)
+    if recipeListIndex and recipeIndex then
+      resultLink = GetRecipeResultItemLink(recipeListIndex, recipeIndex, LINK_STYLE_BRACKETS)
+      if resultLink and resultLink ~= "" then
+        return resultLink
+      end
+    end
+  end
+
+  return nil
 end
 
 --------------------------------------------------------------------
@@ -41,7 +69,12 @@ function FRC.MasterMerchantAvailable()
 end
 
 function FRC.GetRecipePrice(itemLink)
-  if itemLink == nil or not FRC.MasterMerchantAvailable() then
+  if itemLink == nil then
+    if FRC.logger ~= nil then FRC.logger:Verbose("GetRecipePrice: itemLink is nil") end
+    return nil, nil, nil, nil
+  end
+  if not FRC.MasterMerchantAvailable() then
+    if FRC.logger ~= nil then FRC.logger:Verbose("GetRecipePrice: MasterMerchant not available") end
     return nil, nil, nil, nil
   end
 
@@ -50,6 +83,15 @@ function FRC.GetRecipePrice(itemLink)
   local maxDays  = sv.priceMMMaxDays  or 8
 
   local stats = MasterMerchant:itemStats(itemLink, false)
+  if FRC.logger ~= nil then
+    FRC.logger:Verbose("GetRecipePrice: link="..tos(itemLink)
+      .." stats="..tos(stats)
+      .." avgPrice="..tos(stats and stats.avgPrice)
+      .." numSales="..tos(stats and stats.numSales)
+      .." numDays="..tos(stats and stats.numDays)
+      .." craftCost="..tos(stats and stats.craftCost))
+  end
+
   if stats == nil or stats.avgPrice == nil then
     return nil, nil, nil, nil
   end
@@ -59,6 +101,10 @@ function FRC.GetRecipePrice(itemLink)
   if stats.numSales == nil or stats.numDays == nil
      or stats.numSales <= minSales
      or stats.numDays  >= maxDays then
+    if FRC.logger ~= nil then
+      FRC.logger:Verbose("GetRecipePrice: filtered out - numSales="..tos(stats.numSales)
+        .." <= "..tos(minSales).." or numDays="..tos(stats.numDays).." >= "..tos(maxDays))
+    end
     return nil, nil, stats.numSales, stats.numDays
   end
 
@@ -104,7 +150,7 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
     vRecipeItemLink, vRecipeItemLinkId = GetItemlinkDetails(vItemId)
     vRecipeItemName = GetItemLinkName(vRecipeItemLink)
     vLocation = FRC.Data.Misc[vRecipeItemLinkId].location
-    vResultLink, vResultLinkId = GetItemlinkDetails(GetItemLinkRecipeResultItemLink(Linkify(vRecipeItemLinkId)))
+    vResultLink, vResultLinkId = GetItemlinkDetails(FRC.GetRecipeResultLink(vItemLink, vItemId))
     vResultName = GetItemLinkName(vResultLink)
   elseif vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_ALCHEMY_FORMULA_FURNISHING
     or vSpecialType == SPECIALIZED_ITEMTYPE_RECIPE_BLACKSMITHING_DIAGRAM_FURNISHING
@@ -116,7 +162,7 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
       --This is a furnishing recipe
       vRecipeItemLink, vRecipeItemLinkId = GetItemlinkDetails(vItemId)
       vRecipeItemName = GetItemLinkName(vRecipeItemLink)
-      vResultLink, vResultLinkId = GetItemlinkDetails(GetItemLinkRecipeResultItemLink(Linkify(vRecipeItemLinkId)))
+      vResultLink, vResultLinkId = GetItemlinkDetails(FRC.GetRecipeResultLink(vItemLink, vItemId))
       vResultName = GetItemLinkName(vResultLink)
 
       --Loop through each folio looking for recipe
@@ -167,13 +213,13 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
     -- local recipeListName, numRecipes, upIcon, downIcon, overIcon, _, recipeListCreateSound = GetRecipeListInfo(recipeListIndex)
     -- local known_, name_, numIngredients_, provisionerLevelReq_, qualityReq_, specialIngredientType_, requiredCraftingStationType_, resultItemId_ GetRecipeInfo(recipeListIndex,recipeIndex)
     -- local link = GetRecipeIngredientItemLink(recipeListIndex, recipeIndex, i, LINK_STYLE_BRACKETS)
-    vResultLink, vResultLinkId = GetItemlinkDetails(vItemId)
-    vResultName = GetItemLinkName(vResultLink)
+    vResultLink, vResultLinkId = GetItemlinkDetails(vItemLink)
+    vResultName = vItemName
 
     --Loop through each folio looking for recipe
     for i_key,i_value in pairs(FRC.Data.Folios) do
       for j_key,j_value in pairs(FRC.Data.Folios[i_key]) do
-        local vSearchResultLink = GetItemLinkRecipeResultItemLink(Linkify(FRC.Data.Folios[i_key][j_key]))
+        local vSearchResultLink = FRC.GetRecipeResultLink(Linkify(FRC.Data.Folios[i_key][j_key]), FRC.Data.Folios[i_key][j_key])
         local vSearchResultLinkId = GetItemLinkItemId(vSearchResultLink)
 
         if vResultLinkId == vSearchResultLinkId then
@@ -193,7 +239,7 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
       --Loop through each grabn bag looking for recipe, if not found earlier
       for i_key,i_value in pairs(FRC.Data.FurnisherDocuments) do
         for j_key,j_value in pairs(FRC.Data.FurnisherDocuments[i_key]) do
-          local vSearchResultLink, vSearchResultLinkId = GetItemlinkDetails(GetItemLinkRecipeResultItemLink(Linkify(FRC.Data.FurnisherDocuments[i_key][j_key])))
+          local vSearchResultLink, vSearchResultLinkId = GetItemlinkDetails(FRC.GetRecipeResultLink(Linkify(FRC.Data.FurnisherDocuments[i_key][j_key]), FRC.Data.FurnisherDocuments[i_key][j_key]))
 
           if vResultLinkId == vSearchResultLinkId then
             --if FRC.logger ~= nil then FRC.logger:Verbose(Linkify(i).." "..Linkify(FRC.Data.FurnisherDocuments[i_key][j_key]).." "..Linkify(vItemId)) end
@@ -212,7 +258,7 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
     if vFolioItemLinkId == nil and vGrabBagItemLinkId == nil then
       --Loop through each misc looking for recipe, if not found earlier
       for i_key,i_value in pairs(FRC.Data.Misc) do
-        local vSearchResultLink, vSearchResultLinkId = GetItemlinkDetails(GetItemLinkRecipeResultItemLink(Linkify(i_key)))
+        local vSearchResultLink, vSearchResultLinkId = GetItemlinkDetails(FRC.GetRecipeResultLink(Linkify(i_key), i_key))
 
         if vResultLinkId == vSearchResultLinkId then
           --if FRC.logger ~= nil then FRC.logger:Verbose(Linkify(i).." "..Linkify(FRC.Data.Misc[i_key]).." "..Linkify(vItemId)) end
@@ -242,6 +288,11 @@ function FRC.GetRecipeDetail(itemLinkOrItemID)
   -- Price lookup uses vResultLink (the crafted item) not vRecipeItemLink
   -- (the recipe/plan), because Master Merchant tracks sales of the finished
   -- furnishing, not of the recipe scroll itself.
+  if FRC.logger ~= nil then
+    FRC.logger:Verbose("GetRecipeDetail: vRecipeItemLink="..tos(vRecipeItemLink)
+      .." vResultLink="..tos(vResultLink)
+      .." vResultName="..tos(vResultName))
+  end
   vRecipePrice, vRecipePriceProfitable, vRecipeListing =
       FRC.GetRecipePrice(vResultLink)
   
